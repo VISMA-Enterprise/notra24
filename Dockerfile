@@ -2,14 +2,16 @@ FROM node:20-alpine AS base
 
 FROM base AS deps
 WORKDIR /app
+ENV NODE_ENV=development
 COPY package.json package-lock.json ./
 RUN npm ci
 
 FROM base AS builder
 WORKDIR /app
+ENV NODE_ENV=development
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN cat tsconfig.json && echo "---" && ls -la && npm run build
+RUN npm run build
 
 FROM base AS runner
 WORKDIR /app
