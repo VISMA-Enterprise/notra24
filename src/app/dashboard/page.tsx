@@ -1,386 +1,231 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useRouter } from "next/navigation";
 
-interface Case {
-  id: string;
-  createdAt: string;
-  customerId: string;
-  alertType: string;
-  status: string;
-  priority: string;
-  notes: string | null;
-  customer?: any;
-  contacts?: any[];
-}
+const S = { bg: "#0A0A0F", surface: "#12131A", border: "#1E2030", red: "#FF3B3B", green: "#00E676", orange: "#FF9100", yellow: "#FFD600", cyan: "#00E5FF", text: "#E8EAED", muted: "#6B7280" };
 
-const ALERT_ICONS: Record<string, string> = {
-  sos: "🔴", fall: "⚠️", smoke: "🔥", co: "☠️", low_battery: "🔋",
-  device_offline: "📡", power_failure: "⚡", door_open: "🚪", test: "🧪", manual: "📝",
-};
+const ALERT_LABELS: Record<string,string> = { sos:"SOS — KNOPF GEDRÜCKT", fall:"STURZ ERKANNT", low_battery:"BATTERIE SCHWACH", device_offline:"GERÄT OFFLINE", power_failure:"STROMAUSFALL", door_open:"TÜR GEÖFFNET", smoke:"RAUCHMELDER", co:"CO-MELDER" };
+const ALERT_COLORS: Record<string,string> = { sos:S.red, fall:S.orange, low_battery:S.yellow, device_offline:S.muted, power_failure:S.orange, door_open:S.yellow, smoke:S.red, co:S.red };
+const BUNDLE_COLORS: Record<string,string> = { safe_life:"#FF3B3B", safe_home:"#00E676", safe_home_plus:"#00E5FF" };
 
-const ALERT_LABELS: Record<string, string> = {
-  sos: "SOS — NOTRUF", fall: "STURZ ERKANNT", smoke: "RAUCHMELDER",
-  co: "CO-MELDER", low_battery: "AKKU SCHWACH", device_offline: "GERÄT OFFLINE",
-  power_failure: "STROMAUSFALL", door_open: "TÜR GEÖFFNET", test: "TEST", manual: "MANUELL",
-};
+function elapsed(d:string){const s=Math.floor((Date.now()-new Date(d).getTime())/1000);if(s<60)return`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;if(s<3600)return`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;return`${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;}
+function timeAgo(d:string){const s=Math.floor((Date.now()-new Date(d).getTime())/1000);if(s<60)return`vor ${s}s`;if(s<3600)return`vor ${Math.floor(s/60)}m`;return`vor ${Math.floor(s/3600)}h`;}
 
-const BUNDLE_LABELS: Record<string, string> = {
-  safe_home: "SAFE HOME", safe_life: "SAFE LIFE", safe_home_plus: "SAFE HOME+",
-};
-
-const LANG_FLAGS: Record<string, string> = {
-  de: "🇩🇪", tr: "🇹🇷", en: "🇬🇧", ru: "🇷🇺",
-};
-
-function timeAgo(date: string): string {
-  const diff = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
-  if (diff < 60) return `vor ${diff} Sek.`;
-  if (diff < 3600) return `vor ${Math.floor(diff / 60)} Min.`;
-  if (diff < 86400) return `vor ${Math.floor(diff / 3600)} Std.`;
-  return `vor ${Math.floor(diff / 86400)} Tagen`;
+function TopBar({active,operator,logout}:{active:string;operator:any;logout:()=>void}) {
+  const [time,setTime]=useState(new Date());
+  useEffect(()=>{const i=setInterval(()=>setTime(new Date()),1000);return()=>clearInterval(i)},[]);
+  const nav=[{k:"dashboard",l:"Dashboard"},{k:"customers",l:"Kunden"},{k:"cases",l:"Vorfälle"},{k:"status",l:"System"}];
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",height:48,paddingInline:20,background:S.surface,borderBottom:`1px solid ${S.border}`,flexShrink:0}}>
+      <div style={{display:"flex",alignItems:"center",gap:20}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke={S.red} strokeWidth="2"/><line x1="12" y1="8" x2="12" y2="13" stroke={S.red} strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="16" r="1" fill={S.red}/></svg>
+          <span style={{fontSize:14,fontWeight:800,color:"#fff",letterSpacing:1}}>NOTRUF24 LEITSTELLE</span>
+        </div>
+        <div style={{display:"flex",gap:4}}>
+          {nav.map(n=><a key={n.k} href={n.k==="dashboard"?"/dashboard":`/${n.k}`} style={{padding:"6px 16px",fontSize:13,color:active===n.k?"#fff":S.muted,textDecoration:"none",borderRadius:6,border:active===n.k?`1px solid ${S.red}`:"1px solid transparent",background:active===n.k?"rgba(255,59,59,0.08)":"transparent",fontWeight:active===n.k?700:400}}>{n.l}</a>)}
+        </div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:16}}>
+        <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:8,height:8,borderRadius:"50%",background:S.green}}/><span style={{fontSize:12,color:S.green}}>ALLE SYSTEME OK</span></div>
+        <span style={{fontSize:12,color:S.muted}}>{time.toLocaleDateString("de-DE")} <strong style={{color:"#fff"}}>{time.toLocaleTimeString("de-DE")}</strong></span>
+        {operator&&<div style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} onClick={logout}>
+          <div style={{width:28,height:28,borderRadius:"50%",background:S.border,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff"}}>{operator.name?.split(" ").map((n:string)=>n[0]).join("")}</div>
+          <span style={{fontSize:12,color:S.muted}}>{operator.name}</span>
+        </div>}
+      </div>
+    </div>
+  );
 }
 
 export default function DashboardPage() {
-  const { operator, authFetch, logout, loading } = useAuth();
-  const { connected, initAudio, lastMessage } = useWebSocket();
-  const router = useRouter();
-  const [cases, setCases] = useState<Case[]>([]);
-  const [activeCase, setActiveCase] = useState<Case | null>(null);
-  const [devices, setDevices] = useState<any[]>([]);
-  const [notes, setNotes] = useState("");
-  const [showOverlay, setShowOverlay] = useState(false);
-  const [overlayAlert, setOverlayAlert] = useState<any>(null);
+  const {operator,authFetch,logout,loading}=useAuth();
+  const {lastMessage,initAudio}=useWebSocket();
+  const router=useRouter();
+  const [cases,setCases]=useState<any[]>([]);
+  const [activeCase,setActiveCase]=useState<any>(null);
+  const [devices,setDevices]=useState<any[]>([]);
+  const [notes,setNotes]=useState("");
+  const [showOverlay,setShowOverlay]=useState(false);
+  const [overlayData,setOverlayData]=useState<any>(null);
+  const [,setTick]=useState(0);
 
-  useEffect(() => {
-    if (loading) return;
-    if (!operator) { router.push("/"); return; }
-    loadCases();
-    loadDevices();
-    const interval = setInterval(loadDevices, 60000);
-    return () => clearInterval(interval);
-  }, [operator, loading]);
-
-  // Handle new alerts
-  useEffect(() => {
-    if (!lastMessage) return;
-    if (lastMessage.type === "alarm") {
-      const c = lastMessage.case as Case;
-      if (["sos", "fall"].includes(c?.alertType)) {
-        setShowOverlay(true);
-        setOverlayAlert({ ...lastMessage, case: c, customer: lastMessage.customer });
-      }
-      loadCases();
-    }
-    if (lastMessage.type === "case_updated") loadCases();
-    if (lastMessage.type === "device_status") loadDevices();
-  }, [lastMessage]);
-
-  const loadCases = async () => {
-    try {
-      const res = await authFetch("/api/cases?status=open&limit=50");
-      if (res.success) setCases(res.data);
-    } catch {}
-  };
-
-  const loadDevices = async () => {
-    try {
-      const res = await authFetch("/api/status/devices");
-      if (res.success) setDevices(res.data);
-    } catch {}
-  };
-
-  const loadCaseDetail = async (c: Case) => {
-    try {
-      const res = await authFetch(`/api/cases/${c.id}`);
-      if (res.success) {
-        setActiveCase(res.data);
-        setNotes(res.data.notes || "");
-      }
-    } catch {}
-  };
-
-  const updateCase = async (updates: Record<string, any>) => {
-    if (!activeCase) return;
-    try {
-      const res = await authFetch(`/api/cases/${activeCase.id}`, { method: "PUT", body: JSON.stringify(updates) });
-      if (res.success) {
-        setActiveCase(res.data);
-        loadCases();
-      }
-    } catch {}
-  };
-
-  const callCustomer = async () => {
-    if (!activeCase?.customer) return;
-    try {
-      await authFetch("/api/call/customer", {
-        method: "POST",
-        body: JSON.stringify({ phone: activeCase.customer.phoneMobile, caseId: activeCase.id }),
-      });
-    } catch {}
-  };
-
-  const callContact = async (contact: any) => {
-    try {
-      await authFetch("/api/call/contact", {
-        method: "POST",
-        body: JSON.stringify({ phone: contact.phone, contactName: contact.name, caseId: activeCase?.id }),
-      });
-    } catch {}
-  };
-
+  useEffect(()=>{if(loading)return;if(!operator){router.push("/");return;}loadCases();loadDevices();const i=setInterval(()=>{loadDevices();setTick(t=>t+1)},30000);return()=>clearInterval(i)},[operator,loading]);
+  useEffect(()=>{if(!lastMessage)return;if(lastMessage.type==="alarm"){loadCases();if(["sos","fall"].includes(lastMessage.case?.alertType)){setOverlayData(lastMessage);setShowOverlay(true);}}if(lastMessage.type==="case_updated")loadCases();if(lastMessage.type==="device_status")loadDevices();},[lastMessage]);
+  // Timer tick
+  useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),1000);return()=>clearInterval(i)},[]);
   // Auto-save notes
-  useEffect(() => {
-    if (!activeCase || notes === (activeCase.notes || "")) return;
-    const timeout = setTimeout(() => updateCase({ notes }), 5000);
-    return () => clearTimeout(timeout);
-  }, [notes]);
+  useEffect(()=>{if(!activeCase||notes===(activeCase.notes||""))return;const t=setTimeout(()=>updateCase({notes}),5000);return()=>clearTimeout(t)},[notes]);
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--bg)" }}><p style={{ color: "var(--muted)" }}>Laden...</p></div>;
-  if (!operator) return null;
+  const loadCases=async()=>{try{const r=await authFetch("/api/cases?status=open&limit=50");if(r.success)setCases(r.data)}catch{}};
+  const loadDevices=async()=>{try{const r=await authFetch("/api/status/devices");if(r.success)setDevices(r.data)}catch{}};
+  const loadDetail=async(c:any)=>{try{const r=await authFetch(`/api/cases/${c.id}`);if(r.success){setActiveCase(r.data);setNotes(r.data.notes||"")}}catch{}};
+  const updateCase=async(u:any)=>{if(!activeCase)return;try{const r=await authFetch(`/api/cases/${activeCase.id}`,{method:"PUT",body:JSON.stringify(u)});if(r.success){setActiveCase(r.data);loadCases()}}catch{}};
+  const callCustomer=async()=>{if(!activeCase?.customer)return;try{await authFetch("/api/call/customer",{method:"POST",body:JSON.stringify({phone:activeCase.customer.phoneMobile,caseId:activeCase.id})})}catch{}};
+
+  if(loading||!operator)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:S.bg}}><span style={{color:S.muted}}>Laden...</span></div>;
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--bg)" }} onClick={initAudio}>
-      {/* Alert Overlay */}
-      {showOverlay && overlayAlert && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center screen-pulse" style={{ background: "rgba(255,32,32,0.15)", backdropFilter: "blur(4px)" }}>
-          <div className="alert-pulse rounded-2xl p-8 max-w-lg w-full mx-4 text-center" style={{ background: "var(--surface)", border: "2px solid var(--red-alert)" }}>
-            <div className="text-6xl mb-4">{ALERT_ICONS[overlayAlert.case?.alertType] || "🔴"}</div>
-            <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--red-alert)" }}>
-              {ALERT_LABELS[overlayAlert.case?.alertType] || "ALARM"}
-            </h2>
-            <p className="text-xl font-semibold mb-1">
-              {overlayAlert.customer?.firstName} {overlayAlert.customer?.lastName}
-            </p>
-            <p className="mono text-sm mb-6" style={{ color: "var(--muted)" }}>
-              {overlayAlert.customer?.address}
-            </p>
-            <button
-              onClick={() => { setShowOverlay(false); if (overlayAlert.case) loadCaseDetail(overlayAlert.case); updateCase({ status: "in_progress" }); }}
-              className="px-8 py-3 rounded-lg font-bold text-lg uppercase tracking-wider"
-              style={{ background: "var(--red-alert)", color: "white" }}
-            >
-              BESTÄTIGT — ÜBERNEHMEN
+    <div style={{display:"flex",flexDirection:"column",height:"100vh",background:S.bg}} onClick={initAudio}>
+      {/* SOS Overlay */}
+      {showOverlay&&overlayData&&(
+        <div style={{position:"fixed",inset:0,zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(10,10,15,0.85)",backdropFilter:"blur(8px)"}}>
+          <div className="screen-pulse" style={{maxWidth:520,width:"100%",padding:48,borderRadius:20,background:S.surface,border:"2px solid rgba(255,59,59,0.3)",textAlign:"center"}}>
+            <div style={{display:"inline-flex",padding:"8px 24px",borderRadius:20,background:"rgba(0,230,118,0.1)",border:"1px solid rgba(0,230,118,0.3)",color:S.green,fontSize:12,fontWeight:700,letterSpacing:1,marginBottom:24}}>EINGEHENDER ANRUF VOM GERÄT</div>
+            <div style={{margin:"0 auto 16px",width:56,height:56,borderRadius:"50%",border:`2px solid ${S.red}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke={S.red} strokeWidth="2"/><line x1="12" y1="8" x2="12" y2="13" stroke={S.red} strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="16" r="1" fill={S.red}/></svg>
+            </div>
+            <h2 style={{fontSize:32,fontWeight:800,color:S.red,letterSpacing:4,marginBottom:8}}>SOS ALARM</h2>
+            <p style={{fontSize:12,color:S.muted,letterSpacing:2,marginBottom:32}}>KNOPF GEDRÜCKT — HUB RUFT AN</p>
+            <div style={{background:"#000",borderRadius:12,padding:24,marginBottom:24}}>
+              <p style={{fontSize:20,fontWeight:700,color:"#fff"}}>{overlayData.customer?.firstName} {overlayData.customer?.lastName}</p>
+              <p style={{fontSize:13,color:S.muted,marginTop:4}}>{overlayData.customer?.address}</p>
+              <div style={{display:"flex",justifyContent:"center",gap:16,marginTop:12}}>
+                <span style={{fontSize:12,color:S.red,fontWeight:700}}>{overlayData.customer?.bundle?.replace("_"," ").toUpperCase()}</span>
+                {overlayData.customer?.medicalNotes&&<span style={{fontSize:12,color:S.orange}}>{overlayData.customer.medicalNotes}</span>}
+              </div>
+            </div>
+            <button onClick={()=>{setShowOverlay(false);if(overlayData.case)loadDetail(overlayData.case);updateCase({status:"in_progress"})}} style={{width:"100%",padding:16,borderRadius:12,background:S.green,color:"#000",fontSize:16,fontWeight:800,border:"none",cursor:"pointer",letterSpacing:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" stroke="#000" strokeWidth="2"/></svg>
+              ANRUF ANNEHMEN
             </button>
+            <p style={{fontSize:11,color:S.muted,marginTop:12}}>Freisprechen via Hub-Lautsprecher im Raum des Patienten</p>
           </div>
         </div>
       )}
 
-      {/* Header */}
-      <header className="flex items-center justify-between px-6 py-3" style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
-        <div className="flex items-center gap-4">
-          <h1 className="text-lg font-bold" style={{ color: "var(--gold)" }}>NOTRA 24 <span className="text-xs font-normal uppercase" style={{ color: "var(--muted)" }}>• {typeof window !== "undefined" && window.location.hostname.split(".")[0]}</span></h1>
-          <span className="text-xs px-2 py-1 rounded" style={{ background: connected ? "rgba(0,212,106,0.15)" : "rgba(255,32,32,0.15)", color: connected ? "var(--green-ok)" : "var(--red-alert)" }}>
-            {connected ? "● LIVE" : "○ OFFLINE"}
-          </span>
-        </div>
-        <nav className="flex items-center gap-4 text-sm">
-          <a href="/dashboard" className="font-medium" style={{ color: "var(--gold)" }}>Dashboard</a>
-          <a href="/customers" style={{ color: "var(--muted)" }}>Kunden</a>
-          <a href="/cases" style={{ color: "var(--muted)" }}>Vorfälle</a>
-          <a href="/status" style={{ color: "var(--muted)" }}>System</a>
-          <span className="text-xs" style={{ color: "var(--muted)" }}>|</span>
-          <span className="text-xs" style={{ color: "var(--muted)" }}>{operator.name}</span>
-          <button onClick={logout} className="text-xs" style={{ color: "var(--red-alert)" }}>Abmelden</button>
-        </nav>
-      </header>
+      <TopBar active="dashboard" operator={operator} logout={logout}/>
 
-      {/* 3-Column Grid */}
-      <div className="grid grid-cols-12 gap-0" style={{ height: "calc(100vh - 52px)" }}>
-        {/* Left: Alert List */}
-        <div className="col-span-3 overflow-y-auto" style={{ borderRight: "1px solid var(--border)" }}>
-          <div className="p-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>
-              Offene Alarme ({cases.length})
-            </h2>
+      <div style={{display:"flex",flex:1,overflow:"hidden"}}>
+        {/* Left: Alerts */}
+        <div style={{width:320,borderRight:`1px solid ${S.border}`,overflowY:"auto",flexShrink:0}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px 18px"}}>
+            <span style={{fontSize:12,fontWeight:700,color:S.muted,letterSpacing:1}}>AKTIVE ALARME</span>
+            {cases.length>0&&<div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:6,height:6,borderRadius:"50%",background:S.red}}/><span style={{fontSize:12,fontWeight:700,color:S.red}}>{cases.length}</span></div>}
           </div>
-          {cases.map((c) => (
-            <div
-              key={c.id}
-              onClick={() => loadCaseDetail(c)}
-              className={`px-4 py-3 cursor-pointer transition-colors priority-${c.priority}`}
-              style={{
-                background: activeCase?.id === c.id ? "rgba(232,160,32,0.1)" : "transparent",
-                borderBottom: "1px solid var(--border)",
-              }}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium">
-                  {ALERT_ICONS[c.alertType]} {ALERT_LABELS[c.alertType] || c.alertType}
-                </span>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium badge-${c.priority}`}>
-                  {c.priority.toUpperCase()}
-                </span>
+          {cases.map(c=>{const col=ALERT_COLORS[c.alertType]||S.muted;return(
+            <div key={c.id} onClick={()=>loadDetail(c)} style={{padding:"14px 18px",borderLeft:`3px solid ${col}`,borderBottom:`1px solid ${S.border}`,cursor:"pointer",background:activeCase?.id===c.id?"rgba(255,59,59,0.05)":"transparent"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                <span style={{fontSize:11,fontWeight:700,color:col,letterSpacing:0.5}}>{ALERT_LABELS[c.alertType]||c.alertType.toUpperCase()}</span>
+                <span style={{fontSize:11,color:S.muted,fontFamily:"'Inter',monospace"}}>{elapsed(c.createdAt)}</span>
               </div>
-              <div className="text-xs mono" style={{ color: "var(--muted)" }}>
-                {timeAgo(c.createdAt)}
+              <div style={{fontSize:14,fontWeight:600,color:"#fff",marginBottom:4}}>{c.customerFirstName} {c.customerLastName}</div>
+              <div style={{fontSize:12,color:S.muted,marginBottom:8}}>{c.customerAddress||""}</div>
+              <div style={{display:"flex",gap:6}}>
+                {c.bundle&&<span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4,background:"rgba(255,255,255,0.06)",color:BUNDLE_COLORS[c.bundle]||"#fff"}}>{c.bundle.replace(/_/g," ").toUpperCase()}</span>}
+                <span style={{fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:4,background:c.status==="open"?"rgba(255,59,59,0.15)":"rgba(255,145,0,0.15)",color:c.status==="open"?S.red:S.orange}}>{c.status==="open"?"OFFEN":"IN BEARBEITUNG"}</span>
               </div>
             </div>
-          ))}
-          {cases.length === 0 && (
-            <p className="p-4 text-sm text-center" style={{ color: "var(--muted)" }}>Keine offenen Alarme</p>
-          )}
+          )})}
+          {cases.length===0&&<p style={{padding:20,textAlign:"center",fontSize:13,color:S.muted}}>Keine aktiven Alarme</p>}
         </div>
 
-        {/* Middle: Active Case */}
-        <div className="col-span-5 overflow-y-auto" style={{ borderRight: "1px solid var(--border)" }}>
-          {activeCase ? (
-            <div className="p-5">
-              {/* Alert Header */}
-              <div className="rounded-xl p-5 mb-4" style={{ background: "var(--surface)", border: `2px solid ${activeCase.priority === "critical" ? "var(--red-alert)" : "var(--border)"}` }}>
-                <div className="flex items-center gap-3 mb-3">
-                  <span className="text-3xl">{ALERT_ICONS[activeCase.alertType]}</span>
+        {/* Middle: Case Detail */}
+        <div style={{flex:1,overflowY:"auto",borderRight:`1px solid ${S.border}`}}>
+          {activeCase?(
+            <div>
+              {/* Case Header */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 20px",borderBottom:`1px solid ${S.border}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:S.red}}/><span style={{fontSize:12,color:S.muted}}>AKTIVER VORFALL</span><span style={{fontSize:12,color:S.cyan}}>#{activeCase.id?.slice(0,8)}</span>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:12,color:S.muted}}>TIMER:</span><span style={{fontSize:16,fontWeight:800,color:S.red,fontFamily:"'Inter',monospace"}}>{elapsed(activeCase.createdAt)}</span></div>
+              </div>
+              {/* Alert Banner */}
+              <div style={{margin:"12px 20px",padding:"12px",borderRadius:8,background:"rgba(255,59,59,0.1)",textAlign:"center"}}><span style={{fontSize:14,fontWeight:800,color:S.red,letterSpacing:2}}>{ALERT_LABELS[activeCase.alertType]||activeCase.alertType?.toUpperCase()}</span></div>
+              {/* Patient Info */}
+              <div style={{padding:"16px 20px"}}>
+                <div style={{display:"flex",justifyContent:"space-between"}}>
                   <div>
-                    <h3 className="text-lg font-bold" style={{ color: activeCase.priority === "critical" ? "var(--red-alert)" : "var(--text)" }}>
-                      {ALERT_LABELS[activeCase.alertType] || activeCase.alertType}
-                    </h3>
-                    <span className="text-xs mono" style={{ color: "var(--muted)" }}>
-                      ⏱ {timeAgo(activeCase.createdAt)} • Case #{activeCase.id.slice(0, 8)}
-                    </span>
+                    <p style={{fontSize:11,color:S.muted,marginBottom:4}}>PATIENT</p>
+                    <p style={{fontSize:22,fontWeight:700,color:"#fff"}}>{activeCase.customer?.firstName} {activeCase.customer?.lastName}</p>
+                    <p style={{fontSize:11,color:S.muted,marginTop:8}}>ADRESSE</p>
+                    <p style={{fontSize:14,color:"#fff"}}>{activeCase.customer?.address}</p>
+                    {activeCase.customer?.floor&&<p style={{fontSize:13,color:S.muted}}>Kat:{activeCase.customer.floor} — {activeCase.customer.district}, {activeCase.customer.city}</p>}
+                    {activeCase.customer?.medicalNotes&&<><p style={{fontSize:11,color:S.muted,marginTop:8}}>MEDIZINISCHE HINWEISE</p><p style={{fontSize:13,color:S.orange}}>{activeCase.customer.medicalNotes}</p></>}
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    {activeCase.customer?.phoneHome&&<><p style={{fontSize:11,color:S.muted}}>FESTNETZ</p><p style={{fontSize:14,color:S.green,cursor:"pointer"}}>{activeCase.customer.phoneHome}</p></>}
+                    <p style={{fontSize:11,color:S.muted,marginTop:8}}>MOBIL</p>
+                    <p style={{fontSize:14,color:S.green,cursor:"pointer"}}>{activeCase.customer?.phoneMobile}</p>
+                    <p style={{fontSize:11,color:S.muted,marginTop:8}}>BUNDLE</p>
+                    <p style={{fontSize:14,fontWeight:700,color:BUNDLE_COLORS[activeCase.customer?.bundle]||"#fff"}}>{activeCase.customer?.bundle?.replace(/_/g," ").toUpperCase()}</p>
+                    <p style={{fontSize:11,color:S.muted,marginTop:8}}>SPRACHE</p>
+                    <p style={{fontSize:14,color:"#fff"}}>{activeCase.customer?.language==="de"?"Deutsch":activeCase.customer?.language==="tr"?"Türkçe":activeCase.customer?.language==="en"?"English":"Русский"}</p>
                   </div>
                 </div>
-
-                {activeCase.customer && (
-                  <>
-                    <div className="h-px my-3" style={{ background: "var(--border)" }} />
-                    <div className="space-y-2">
-                      <p className="text-xl font-semibold">
-                        {activeCase.customer.firstName} {activeCase.customer.lastName}
-                        {activeCase.customer.birthYear && <span className="text-sm ml-2" style={{ color: "var(--muted)" }}>*{activeCase.customer.birthYear}</span>}
-                      </p>
-                      <p className="mono text-sm" style={{ color: "var(--muted)" }}>
-                        {activeCase.customer.address}
-                        {activeCase.customer.floor && ` Kat:${activeCase.customer.floor}`}
-                        {activeCase.customer.apartment && ` No:${activeCase.customer.apartment}`}
-                      </p>
-                      <p className="mono text-sm" style={{ color: "var(--muted)" }}>
-                        {activeCase.customer.district && `${activeCase.customer.district}, `}{activeCase.customer.city}
-                      </p>
-                      <div className="h-px my-2" style={{ background: "var(--border)" }} />
-                      <p className="mono">📱 {activeCase.customer.phoneMobile}</p>
-                      {activeCase.customer.phoneHome && <p className="mono text-sm" style={{ color: "var(--muted)" }}>🏠 {activeCase.customer.phoneHome}</p>}
-                      <p className="text-sm">Paket: <span className="font-semibold" style={{ color: "var(--gold)" }}>{BUNDLE_LABELS[activeCase.customer.bundle] || activeCase.customer.bundle}</span></p>
-                      <p className="text-sm">Sprache: {LANG_FLAGS[activeCase.customer.language]} {activeCase.customer.language?.toUpperCase()}</p>
-                      {activeCase.customer.medicalNotes && (
-                        <p className="text-sm p-2 rounded" style={{ background: "rgba(255,170,0,0.1)", color: "var(--yellow-warn)" }}>
-                          ⚕️ {activeCase.customer.medicalNotes}
-                        </p>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {activeCase.contacts && activeCase.contacts.length > 0 && (
-                  <>
-                    <div className="h-px my-3" style={{ background: "var(--border)" }} />
-                    <p className="text-xs uppercase tracking-wider mb-2" style={{ color: "var(--muted)" }}>Notfallkontakte</p>
-                    {activeCase.contacts.map((contact: any) => (
-                      <div key={contact.id} className="flex items-center justify-between py-1">
-                        <span className="text-sm">{contact.priority}. {contact.name} <span className="mono text-xs" style={{ color: "var(--muted)" }}>{contact.phone}</span></span>
-                        <button onClick={() => callContact(contact)} className="text-xs px-2 py-1 rounded" style={{ background: "rgba(232,160,32,0.2)", color: "var(--gold)" }}>Anrufen</button>
+              </div>
+              {/* Emergency Contacts */}
+              {activeCase.contacts?.length>0&&(
+                <div style={{padding:"12px 20px",borderTop:`1px solid ${S.border}`}}>
+                  <p style={{fontSize:11,color:S.muted,letterSpacing:1,marginBottom:12}}>NOTFALLKONTAKTE</p>
+                  {activeCase.contacts.map((c:any)=>(
+                    <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",borderRadius:8,border:`1px solid ${S.border}`,marginBottom:8}}>
+                      <div style={{display:"flex",alignItems:"center",gap:12}}>
+                        <div style={{width:28,height:28,borderRadius:"50%",background:S.red,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff"}}>{c.priority}</div>
+                        <div><span style={{fontSize:14,fontWeight:600,color:"#fff"}}>{c.name}</span>{c.relationship&&<span style={{fontSize:12,color:S.muted}}> ({c.relationship})</span>}<span style={{fontSize:12,color:S.muted,marginLeft:8}}>{c.phone}</span></div>
                       </div>
-                    ))}
-                  </>
-                )}
-              </div>
-
+                      <button onClick={()=>authFetch("/api/call/contact",{method:"POST",body:JSON.stringify({phone:c.phone,contactName:c.name,caseId:activeCase.id})})} style={{padding:"6px 16px",borderRadius:6,background:"rgba(0,230,118,0.1)",border:"1px solid rgba(0,230,118,0.3)",color:S.green,fontSize:12,fontWeight:600,cursor:"pointer"}}>Anrufen</button>
+                    </div>
+                  ))}
+                </div>
+              )}
               {/* Action Buttons */}
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                <button onClick={callCustomer} className="p-3 rounded-lg text-sm font-semibold" style={{ background: "rgba(0,212,106,0.15)", color: "var(--green-ok)", border: "1px solid rgba(0,212,106,0.3)" }}>
-                  📞 Kunden anrufen
-                </button>
-                {activeCase.contacts?.slice(0, 2).map((c: any, i: number) => (
-                  <button key={c.id} onClick={() => callContact(c)} className="p-3 rounded-lg text-sm font-semibold" style={{ background: "rgba(232,160,32,0.15)", color: "var(--gold)", border: "1px solid rgba(232,160,32,0.3)" }}>
-                    👨‍👩‍👧 Kontakt {i + 1}
+              <div style={{padding:"12px 20px",borderTop:`1px solid ${S.border}`}}>
+                <p style={{fontSize:11,color:S.muted,letterSpacing:1,marginBottom:8}}>PATIENT REAGIERT NICHT? MANUELL ANRUFEN:</p>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={callCustomer} style={{flex:1,padding:"8px",borderRadius:6,background:S.surface,border:`1px solid ${S.border}`,color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" stroke="#fff" strokeWidth="2"/></svg>
+                    Mobil
                   </button>
-                ))}
+                  <button style={{padding:"8px 16px",borderRadius:6,background:S.surface,border:`1px solid ${S.border}`,color:"#fff",fontSize:12,cursor:"pointer"}}>Festnetz</button>
+                  <button onClick={()=>updateCase({notes:(notes?notes+"\n":"")+"✓ 112 informiert"})} style={{padding:"8px 16px",borderRadius:6,background:S.surface,border:`1px solid ${S.border}`,color:"#fff",fontSize:12,cursor:"pointer"}}>112 informiert</button>
+                  <button onClick={()=>updateCase({status:"false_alarm",resolutionNote:"Fehlalarm"})} style={{padding:"8px 16px",borderRadius:6,background:"rgba(255,59,59,0.1)",border:`1px solid rgba(255,59,59,0.3)`,color:S.red,fontSize:12,fontWeight:600,cursor:"pointer"}}>Falschalarm</button>
+                </div>
               </div>
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                <button onClick={() => updateCase({ notes: (notes ? notes + "\n" : "") + "✓ 112 informiert" })} className="p-2 rounded-lg text-xs font-medium" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                  🚑 112 Informiert
-                </button>
-                <button onClick={() => updateCase({ status: "false_alarm", resolutionNote: "Fehlalarm" })} className="p-2 rounded-lg text-xs font-medium" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                  ✅ Fehlalarm
-                </button>
-                <button onClick={() => updateCase({ status: "resolved", resolutionNote: notes })} className="p-2 rounded-lg text-xs font-medium" style={{ background: "rgba(0,212,106,0.15)", color: "var(--green-ok)", border: "1px solid rgba(0,212,106,0.3)" }}>
-                  ✓ Case schließen
-                </button>
-              </div>
-
               {/* Notes */}
-              <div>
-                <label className="text-xs uppercase tracking-wider" style={{ color: "var(--muted)" }}>Notizen</label>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={4}
-                  className="w-full mt-2 p-3 rounded-lg text-sm mono outline-none resize-none"
-                  style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--text)" }}
-                  placeholder="Notizen zum Vorfall..."
-                />
-                <p className="text-[10px] mt-1" style={{ color: "var(--muted)" }}>Auto-Save alle 5 Sek.</p>
+              <div style={{padding:"12px 20px",borderTop:`1px solid ${S.border}`}}>
+                <p style={{fontSize:11,color:S.muted,letterSpacing:1,marginBottom:8}}>NOTIZEN</p>
+                <textarea value={notes} onChange={e=>setNotes(e.target.value)} style={{width:"100%",minHeight:150,background:S.surface,border:`1px solid ${S.border}`,borderRadius:8,padding:12,fontSize:13,color:"#fff",outline:"none",resize:"vertical",fontFamily:"Inter"}} placeholder="Notizen zum Vorfall..."/>
               </div>
             </div>
-          ) : (
-            <div className="flex items-center justify-center h-full">
-              <p style={{ color: "var(--muted)" }}>Alarm auswählen oder auf neuen Alarm warten</p>
-            </div>
+          ):(
+            <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%"}}><span style={{color:S.muted}}>Alarm auswählen oder auf neuen Alarm warten</span></div>
           )}
         </div>
 
         {/* Right: Map + Devices */}
-        <div className="col-span-4 overflow-y-auto">
-          {/* Map placeholder */}
-          <div className="p-4">
-            <div className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)", height: "280px" }}>
-              {activeCase?.customer && (activeCase as any).gpsLat ? (
-                <iframe
-                  className="w-full h-full border-0"
-                  src={`https://www.openstreetmap.org/export/embed.html?bbox=${(activeCase as any).gpsLng - 0.01}%2C${(activeCase as any).gpsLat - 0.01}%2C${(activeCase as any).gpsLng + 0.01}%2C${(activeCase as any).gpsLat + 0.01}&layer=mapnik&marker=${(activeCase as any).gpsLat}%2C${(activeCase as any).gpsLng}`}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full">
-                  <p className="text-sm" style={{ color: "var(--muted)" }}>📍 Kein GPS-Signal</p>
-                </div>
-              )}
-            </div>
+        <div style={{width:380,overflowY:"auto",flexShrink:0}}>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"12px 16px",borderBottom:`1px solid ${S.border}`}}>
+            <span style={{fontSize:12,fontWeight:700,color:S.muted,letterSpacing:1}}>STANDORT</span>
+            {activeCase?.gpsLat&&<span style={{fontSize:11,color:S.muted}}>{activeCase.gpsLat}°N, {activeCase.gpsLng}°E</span>}
           </div>
-
-          {/* Device Status */}
-          <div className="p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--muted)" }}>
-              Gerätestatus
-            </h3>
-            <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)" }}>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr style={{ background: "var(--surface)" }}>
-                    <th className="text-left p-2 font-medium" style={{ color: "var(--muted)" }}>Kunde</th>
-                    <th className="text-center p-2 font-medium" style={{ color: "var(--muted)" }}>Hub</th>
-                    <th className="text-center p-2 font-medium" style={{ color: "var(--muted)" }}>Mobil</th>
-                    <th className="text-center p-2 font-medium" style={{ color: "var(--muted)" }}>Akku</th>
-                    <th className="text-right p-2 font-medium" style={{ color: "var(--muted)" }}>Ping</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {devices.map((d) => (
-                    <tr key={d.customerId} style={{ borderTop: "1px solid var(--border)" }}>
-                      <td className="p-2 font-medium">{d.customerName}</td>
-                      <td className="text-center p-2">{d.hub ? (d.hub.status === "online" ? "🟢" : d.hub.status === "low_battery" ? "🟡" : "🔴") : "—"}</td>
-                      <td className="text-center p-2">{d.mobile ? (d.mobile.status === "online" ? "🟢" : d.mobile.status === "low_battery" ? "🟡" : "🔴") : "—"}</td>
-                      <td className="text-center p-2 mono">{d.mobile?.battery ?? d.hub?.battery ?? "—"}%</td>
-                      <td className="text-right p-2 mono" style={{ color: "var(--muted)" }}>{d.hub?.lastSeen ? timeAgo(d.hub.lastSeen) : d.mobile?.lastSeen ? timeAgo(d.mobile.lastSeen) : "—"}</td>
-                    </tr>
-                  ))}
-                  {devices.length === 0 && (
-                    <tr><td colSpan={5} className="p-4 text-center" style={{ color: "var(--muted)" }}>Keine Geräte registriert</td></tr>
-                  )}
-                </tbody>
-              </table>
+          <div style={{height:240,background:S.surface,display:"flex",alignItems:"center",justifyContent:"center",borderBottom:`1px solid ${S.border}`}}>
+            {activeCase?.gpsLat?<iframe style={{width:"100%",height:"100%",border:0}} src={`https://www.openstreetmap.org/export/embed.html?bbox=${activeCase.gpsLng-0.01}%2C${activeCase.gpsLat-0.01}%2C${Number(activeCase.gpsLng)+0.01}%2C${Number(activeCase.gpsLat)+0.01}&layer=mapnik&marker=${activeCase.gpsLat}%2C${activeCase.gpsLng}`}/>:<span style={{color:S.muted,fontSize:12}}>Kein GPS</span>}
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"12px 16px",borderBottom:`1px solid ${S.border}`}}>
+            <span style={{fontSize:12,fontWeight:700,color:S.muted,letterSpacing:1}}>GERÄTESTATUS</span>
+            <span style={{fontSize:11}}><span style={{color:S.green}}>{devices.filter(d=>d.hub?.status==="online"||d.mobile?.status==="online").length} online</span><span style={{color:S.muted}}> | </span><span style={{color:S.red}}>{devices.filter(d=>d.hub?.status==="offline").length} offline</span></span>
+          </div>
+          <div style={{padding:"0 16px"}}>
+            <div style={{display:"flex",padding:"8px 0",borderBottom:`1px solid ${S.border}`}}>
+              <span style={{flex:2,fontSize:11,color:S.muted}}>KUNDE</span>
+              <span style={{width:48,fontSize:11,color:S.muted,textAlign:"center"}}>HUB</span>
+              <span style={{width:48,fontSize:11,color:S.muted,textAlign:"center"}}>BAND</span>
+              <span style={{width:48,fontSize:11,color:S.muted,textAlign:"center"}}>AKKU</span>
+              <span style={{flex:1,fontSize:11,color:S.muted,textAlign:"right"}}>ZULETZT</span>
             </div>
+            {devices.map(d=>(
+              <div key={d.customerId} style={{display:"flex",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${S.border}`}}>
+                <span style={{flex:2,fontSize:12,color:activeCase?.customer?.id===d.customerId?S.cyan:"#fff"}}>{d.customerName?.split(" ").map((n:string,i:number)=>i===0?n[0]+".":n).join(" ")}</span>
+                <span style={{width:48,textAlign:"center"}}>{d.hub?<><span style={{display:"inline-block",width:6,height:6,borderRadius:"50%",background:d.hub.status==="online"?S.green:S.red}}/> <span style={{fontSize:11,color:d.hub.status==="online"?S.green:S.red}}>{d.hub.status==="online"?"ON":"OFF"}</span></>:"—"}</span>
+                <span style={{width:48,textAlign:"center"}}>{d.mobile?<><span style={{display:"inline-block",width:6,height:6,borderRadius:"50%",background:d.mobile.status==="online"?S.green:d.mobile.status==="low_battery"?S.orange:S.red}}/> <span style={{fontSize:11,color:d.mobile.status==="online"?S.green:S.orange}}>ON</span></>:"—"}</span>
+                <span style={{width:48,textAlign:"center",fontSize:12,color:(d.mobile?.battery||d.hub?.battery||0)<30?S.red:S.green,fontWeight:600}}>{d.mobile?.battery||d.hub?.battery||"—"}%</span>
+                <span style={{flex:1,textAlign:"right",fontSize:11,color:S.muted}}>{d.hub?.lastSeen?timeAgo(d.hub.lastSeen):d.mobile?.lastSeen?timeAgo(d.mobile.lastSeen):"—"}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
