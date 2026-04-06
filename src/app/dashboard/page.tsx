@@ -172,7 +172,7 @@ export default function DashboardPage() {
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-3" style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
         <div className="flex items-center gap-4">
-          <h1 className="text-lg font-bold" style={{ color: "var(--gold)" }}>NOTRA 24</h1>
+          <h1 className="text-lg font-bold" style={{ color: "var(--gold)" }}>NOTRA 24 <span className="text-xs font-normal uppercase" style={{ color: "var(--muted)" }}>• {typeof window !== "undefined" && window.location.hostname.split(".")[0]}</span></h1>
           <span className="text-xs px-2 py-1 rounded" style={{ background: connected ? "rgba(0,212,106,0.15)" : "rgba(255,32,32,0.15)", color: connected ? "var(--green-ok)" : "var(--red-alert)" }}>
             {connected ? "● LIVE" : "○ OFFLINE"}
           </span>

@@ -10,6 +10,7 @@ import {
   date,
   jsonb,
   pgEnum,
+  index,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -31,7 +32,7 @@ export const operatorLanguageEnum = pgEnum("operator_language", [
   "tr",
   "en",
 ]);
-export const roleEnum = pgEnum("role", ["operator", "admin"]);
+export const roleEnum = pgEnum("role", ["operator", "admin", "super_admin"]);
 export const alertTypeEnum = pgEnum("alert_type", [
   "sos",
   "fall",
@@ -67,11 +68,44 @@ export const deviceStatusEnum = pgEnum("device_status", [
   "offline",
   "low_battery",
 ]);
+export const orgStatusEnum = pgEnum("org_status", [
+  "active",
+  "suspended",
+  "trial",
+]);
+
+// ── Organizations (Franchise Locations) ────────────────────────────
+
+export const organizations = pgTable("organizations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  name: varchar("name", { length: 200 }).notNull(),
+  slug: varchar("slug", { length: 100 }).notNull().unique(), // subdomain: "antalya", "istanbul"
+  city: varchar("city", { length: 100 }).notNull(),
+  country: varchar("country", { length: 100 }).notNull().default("TR"),
+  timezone: varchar("timezone", { length: 100 }).notNull().default("Europe/Istanbul"),
+  status: orgStatusEnum("status").notNull().default("active"),
+  logtoOrgId: varchar("logto_org_id", { length: 200 }), // Logto organization ID
+  contactEmail: varchar("contact_email", { length: 200 }),
+  contactPhone: varchar("contact_phone", { length: 20 }),
+  maxOperators: integer("max_operators").notNull().default(5),
+  maxCustomers: integer("max_customers").notNull().default(100),
+  settings: jsonb("settings"), // org-specific settings
+  notes: text("notes"),
+});
 
 // ── Tables ─────────────────────────────────────────────────────────
 
 export const customers = pgTable("customers", {
   id: uuid("id").primaryKey().defaultRandom(),
+  organizationId: uuid("organization_id")
+    .notNull()
+    .references(() => organizations.id),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -97,7 +131,11 @@ export const customers = pgTable("customers", {
   monthlyFee: decimal("monthly_fee", { precision: 8, scale: 2 }),
   contractStart: date("contract_start"),
   notes: text("notes"),
-});
+}, (table) => [
+  index("idx_customers_org").on(table.organizationId),
+  index("idx_customers_device_hub").on(table.deviceIdHub),
+  index("idx_customers_device_mobile").on(table.deviceIdMobile),
+]);
 
 export const emergencyContacts = pgTable("emergency_contacts", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -114,21 +152,30 @@ export const emergencyContacts = pgTable("emergency_contacts", {
 
 export const operators = pgTable("operators", {
   id: uuid("id").primaryKey().defaultRandom(),
+  organizationId: uuid("organization_id")
+    .references(() => organizations.id),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
   name: varchar("name", { length: 200 }).notNull(),
   email: varchar("email", { length: 200 }).notNull().unique(),
   passwordHash: varchar("password_hash", { length: 500 }).notNull(),
+  logtoUserId: varchar("logto_user_id", { length: 200 }), // Logto user ID
   phoneExtension: varchar("phone_extension", { length: 10 }),
   language: operatorLanguageEnum("language").notNull().default("de"),
   role: roleEnum("role").notNull().default("operator"),
   active: boolean("active").notNull().default(true),
   lastLogin: timestamp("last_login", { withTimezone: true }),
-});
+}, (table) => [
+  index("idx_operators_org").on(table.organizationId),
+  index("idx_operators_logto").on(table.logtoUserId),
+]);
 
 export const cases = pgTable("cases", {
   id: uuid("id").primaryKey().defaultRandom(),
+  organizationId: uuid("organization_id")
+    .notNull()
+    .references(() => organizations.id),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -148,10 +195,15 @@ export const cases = pgTable("cases", {
   durationSeconds: integer("duration_seconds"),
   resolvedBy: uuid("resolved_by").references(() => operators.id),
   resolutionNote: text("resolution_note"),
-});
+}, (table) => [
+  index("idx_cases_org").on(table.organizationId),
+  index("idx_cases_status").on(table.status),
+]);
 
 export const deviceHeartbeats = pgTable("device_heartbeats", {
   id: uuid("id").primaryKey().defaultRandom(),
+  organizationId: uuid("organization_id")
+    .references(() => organizations.id),
   receivedAt: timestamp("received_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -168,6 +220,8 @@ export const deviceHeartbeats = pgTable("device_heartbeats", {
 
 export const auditLog = pgTable("audit_log", {
   id: uuid("id").primaryKey().defaultRandom(),
+  organizationId: uuid("organization_id")
+    .references(() => organizations.id),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -181,7 +235,17 @@ export const auditLog = pgTable("audit_log", {
 
 // ── Relations ──────────────────────────────────────────────────────
 
-export const customersRelations = relations(customers, ({ many }) => ({
+export const organizationsRelations = relations(organizations, ({ many }) => ({
+  customers: many(customers),
+  operators: many(operators),
+  cases: many(cases),
+}));
+
+export const customersRelations = relations(customers, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [customers.organizationId],
+    references: [organizations.id],
+  }),
   emergencyContacts: many(emergencyContacts),
   cases: many(cases),
   deviceHeartbeats: many(deviceHeartbeats),
@@ -197,12 +261,20 @@ export const emergencyContactsRelations = relations(
   })
 );
 
-export const operatorsRelations = relations(operators, ({ many }) => ({
+export const operatorsRelations = relations(operators, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [operators.organizationId],
+    references: [organizations.id],
+  }),
   cases: many(cases),
   auditLogs: many(auditLog),
 }));
 
 export const casesRelations = relations(cases, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [cases.organizationId],
+    references: [organizations.id],
+  }),
   customer: one(customers, {
     fields: [cases.customerId],
     references: [customers.id],

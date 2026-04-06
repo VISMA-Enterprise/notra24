@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { operators } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { operators, organizations } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
 import { comparePassword, signToken } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { getTenantSlug } from "@/lib/tenant";
 
 export async function POST(req: NextRequest) {
   try {
     const { email, password } = await req.json();
+    const host = req.headers.get("host") || "";
+    const slug = getTenantSlug(host);
 
     if (!email || !password) {
       return NextResponse.json(
@@ -16,6 +19,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Find operator
     const [operator] = await db
       .select()
       .from(operators)
@@ -37,7 +41,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Update last login
+    // For non-super-admin: verify operator belongs to this org
+    if (slug && slug !== "admin" && operator.role !== "super_admin") {
+      const [org] = await db
+        .select()
+        .from(organizations)
+        .where(eq(organizations.slug, slug))
+        .limit(1);
+
+      if (!org || operator.organizationId !== org.id) {
+        return NextResponse.json(
+          { error: "No access to this location" },
+          { status: 403 }
+        );
+      }
+    }
+
+    // Resolve org name for token
+    let orgSlug = slug || "admin";
+    if (operator.organizationId) {
+      const [org] = await db
+        .select({ slug: organizations.slug })
+        .from(organizations)
+        .where(eq(organizations.id, operator.organizationId))
+        .limit(1);
+      if (org) orgSlug = org.slug;
+    }
+
     await db
       .update(operators)
       .set({ lastLogin: new Date() })
@@ -48,6 +78,8 @@ export async function POST(req: NextRequest) {
       email: operator.email,
       role: operator.role,
       name: operator.name,
+      organizationId: operator.organizationId,
+      slug: orgSlug,
     });
 
     await logAudit({
@@ -56,13 +88,13 @@ export async function POST(req: NextRequest) {
         email: operator.email,
         role: operator.role,
         name: operator.name,
+        organizationId: operator.organizationId,
+        slug: orgSlug,
       },
       action: "login",
       entityType: "operator",
       entityId: operator.id,
-      ipAddress:
-        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-        undefined,
+      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim(),
     });
 
     const response = NextResponse.json({
@@ -76,16 +108,16 @@ export async function POST(req: NextRequest) {
           role: operator.role,
           language: operator.language,
           phoneExtension: operator.phoneExtension,
+          organizationId: operator.organizationId,
         },
       },
     });
 
-    // Also set as httpOnly cookie
     response.cookies.set("token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 86400, // 24h
+      maxAge: 86400,
       path: "/",
     });
 

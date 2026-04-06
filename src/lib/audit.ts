@@ -12,6 +12,7 @@ export async function logAudit(params: {
 }) {
   try {
     await db.insert(auditLog).values({
+      organizationId: params.operator?.organizationId ?? null,
       operatorId: params.operator?.operatorId ?? null,
       action: params.action,
       entityType: params.entityType,

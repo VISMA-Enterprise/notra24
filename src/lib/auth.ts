@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { operators } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 const TOKEN_EXPIRY = "24h";
@@ -11,8 +11,10 @@ const TOKEN_EXPIRY = "24h";
 export interface JWTPayload {
   operatorId: string;
   email: string;
-  role: "operator" | "admin";
+  role: "operator" | "admin" | "super_admin";
   name: string;
+  organizationId: string | null;
+  slug: string;
 }
 
 export function signToken(payload: JWTPayload): string {
@@ -50,7 +52,6 @@ export async function authenticateRequest(
 
   try {
     const payload = verifyToken(token);
-    // Verify operator still exists and is active
     const [operator] = await db
       .select({ active: operators.active })
       .from(operators)
@@ -62,6 +63,19 @@ export async function authenticateRequest(
   } catch {
     return null;
   }
+}
+
+/**
+ * Check if operator has access to the requested organization.
+ * Super admins have access to all organizations.
+ */
+export function hasOrgAccess(
+  payload: JWTPayload,
+  requestedOrgId: string | null
+): boolean {
+  if (payload.role === "super_admin") return true;
+  if (!requestedOrgId) return false;
+  return payload.organizationId === requestedOrgId;
 }
 
 export function unauthorized(message = "Unauthorized") {

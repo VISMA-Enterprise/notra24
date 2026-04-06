@@ -1,7 +1,19 @@
 notra24.com {
-    reverse_proxy app:3000
+    respond "Notra 24 — Notdienst-Franchise Platform" 200
+}
+
+auth.notra24.com {
+    reverse_proxy logto:3001
 }
 
 n8n.notra24.com {
     reverse_proxy n8n:5678
+}
+
+antalya.notra24.com {
+    reverse_proxy app:3000
+}
+
+admin.notra24.com {
+    reverse_proxy app:3000
 }

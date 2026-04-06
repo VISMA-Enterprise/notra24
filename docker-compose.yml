@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   app:
     build: .
@@ -14,6 +12,9 @@ services:
       - FREEPBX_RING_GROUP=800
       - N8N_URL=http://n8n:5678
       - N8N_WEBHOOK_URL=http://n8n:5678/webhook/alarm
+      - LOGTO_ENDPOINT=https://auth.notra24.com
+      - LOGTO_APP_ID=${LOGTO_APP_ID:-changeme}
+      - LOGTO_APP_SECRET=${LOGTO_APP_SECRET:-changeme}
       - NODE_ENV=production
     depends_on:
       postgres:
@@ -83,6 +84,24 @@ services:
     networks:
       - notra
 
+  logto:
+    image: svhd/logto:latest
+    container_name: notra-logto
+    ports:
+      - "3301:3001"
+      - "3302:3002"
+    environment:
+      - TRUST_PROXY_HEADER=1
+      - DB_URL=postgresql://safehands:${DB_PASS}@postgres:5432/logto
+      - ENDPOINT=https://auth.notra24.com
+      - ADMIN_ENDPOINT=https://auth.notra24.com/admin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - notra
+
   caddy:
     image: caddy:2-alpine
     container_name: notra-caddy
@@ -96,6 +115,7 @@ services:
     depends_on:
       - app
       - n8n
+      - logto
     restart: unless-stopped
     networks:
       - notra
