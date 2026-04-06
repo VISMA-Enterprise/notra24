@@ -9,7 +9,7 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN ls -la src/ && ls -la src/hooks/ && ls -la src/app/ && npm run build
+RUN cat tsconfig.json && echo "---" && ls -la && npm run build
 
 FROM base AS runner
 WORKDIR /app
