@@ -1,0 +1,42 @@
+version: '3.8'
+services:
+  freepbx:
+    image: tiredofit/freepbx:latest
+    container_name: notra-freepbx
+    ports:
+      - "8080:80"
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "10000-10050:10000-10050/udp"
+    environment:
+      - DB_HOST=freepbx-db
+      - DB_PORT=3306
+      - DB_NAME=freepbx
+      - DB_USER=freepbx
+      - DB_PASS=${FREEPBX_DB_PASS:-changeme}
+      - RTP_START=10000
+      - RTP_FINISH=10050
+      - HTTP_PORT=80
+    volumes:
+      - freepbx_data:/var/www/html
+      - freepbx_logs:/var/log
+    restart: unless-stopped
+    depends_on:
+      - freepbx-db
+
+  freepbx-db:
+    image: mariadb:10.11
+    container_name: notra-freepbx-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=${FREEPBX_DB_PASS:-changeme}
+      - MYSQL_DATABASE=freepbx
+      - MYSQL_USER=freepbx
+      - MYSQL_PASSWORD=${FREEPBX_DB_PASS:-changeme}
+    volumes:
+      - freepbx_db_data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  freepbx_data:
+  freepbx_logs:
+  freepbx_db_data:

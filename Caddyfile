@@ -1,0 +1,7 @@
+notra24.com {
+    reverse_proxy app:3000
+}
+
+n8n.notra24.com {
+    reverse_proxy n8n:5678
+}

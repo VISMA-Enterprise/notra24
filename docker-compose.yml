@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: notra-app
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://safehands:${DB_PASS}@postgres:5432/safehands
+      - JWT_SECRET=${JWT_SECRET}
+      - FREEPBX_URL=http://notra-freepbx
+      - FREEPBX_API_KEY=${FREEPBX_API_KEY:-changeme}
+      - FREEPBX_RING_GROUP=800
+      - N8N_URL=http://n8n:5678
+      - N8N_WEBHOOK_URL=http://n8n:5678/webhook/alarm
+      - NODE_ENV=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - notra
+
+  alarm-receiver:
+    build: ./services/alarm-receiver
+    container_name: notra-alarm-receiver
+    ports:
+      - "5001:5001"
+    environment:
+      - N8N_WEBHOOK_URL=http://n8n:5678/webhook/alarm
+      - TCP_PORT=5001
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    volumes:
+      - alarm_queue:/app/data
+    networks:
+      - notra
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: notra-postgres
+    environment:
+      - POSTGRES_DB=safehands
+      - POSTGRES_USER=safehands
+      - POSTGRES_PASSWORD=${DB_PASS}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safehands"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - notra
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: notra-n8n
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASS:-changeme}
+      - N8N_HOST=n8n.notra24.com
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://n8n.notra24.com/
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=safehands
+      - DB_POSTGRESDB_PASSWORD=${DB_PASS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - notra
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: notra-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - n8n
+    restart: unless-stopped
+    networks:
+      - notra
+
+networks:
+  notra:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  n8n_data:
+  alarm_queue:
+  caddy_data:
+  caddy_config:
