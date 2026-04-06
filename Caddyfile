@@ -1,5 +1,5 @@
-notra24.com {
-    respond "Notra 24 — Notdienst-Franchise Platform" 200
+notra24.com, www.notra24.com {
+    reverse_proxy website:3000
 }
 
 auth.notra24.com {

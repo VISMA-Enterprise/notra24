@@ -23,6 +23,17 @@ services:
     networks:
       - notra
 
+  website:
+    build: /opt/notra24-website
+    container_name: notra-website
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - notra
+
   alarm-receiver:
     build: ./services/alarm-receiver
     container_name: notra-alarm-receiver
@@ -114,6 +125,7 @@ services:
       - caddy_config:/config
     depends_on:
       - app
+      - website
       - n8n
       - logto
     restart: unless-stopped
